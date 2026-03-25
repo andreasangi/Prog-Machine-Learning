@@ -1,6 +1,7 @@
 # Datasets (don't commit raw data)
 *.zip
-metal_nut/
+data/metal_nut/
+data/processed/*.pkl
 mvtec_ad/
 datasets/
 data/
