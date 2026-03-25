@@ -1,0 +1,79 @@
+# Datasets (don't commit raw data)
+*.zip
+metal_nut/
+mvtec_ad/
+datasets/
+data/
+*.tar.gz
+
+# Model weights and checkpoints
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.model
+models/
+checkpoints/
+weights/
+saved_models/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+.jupyter
+*checkpoint*
+
+# Colab artifacts
+.colab_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Output files
+*.log
+results/
+outputs/
+runs/
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
