@@ -28,7 +28,7 @@ def apply_exposure(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
     alpha > 1  → over-exposure (e.g. blown highlights, long exposure)
     beta       → additive offset (dark current / ambient offset)
 
-    Industrial application: line lighting intensity varies with voltage
+    Industrial case: line lighting intensity varies with voltage
     fluctuations, lamp aging, and controller settings.
     Plausible range: alpha ∈ [0.5, 1.7], beta ∈ [-30, 30]
     """

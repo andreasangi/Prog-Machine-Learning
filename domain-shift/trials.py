@@ -42,28 +42,26 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
         return rng.sample(paths, n)
     return paths[:n]
 
-def apply_exposure(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_gamma(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Simulate exposure variation via linear scaling.
+    Gamma correction to simulate different sensor response curves.
 
-    alpha < 1  → under-exposure (e.g. insufficient light, fast shutter)
-    alpha > 1  → over-exposure (e.g. blown highlights, long exposure)
-    beta       → additive offset (dark current / ambient offset)
+    gamma < 1  → image brightened (as if sensor is more sensitive)      -- lifts shadows/midtones
+    gamma > 1  → image darkened         -- compresses shadows/midtones
 
-    Industrial justification: line lighting intensity varies with voltage
-    fluctuations, lamp aging, and controller settings.
-    Plausible range: alpha ∈ [0.4, 1.8], beta ∈ [-30, 30]
+    Industrial case: different camera models (or firmware versions)
+    apply different gamma tables in-sensor. Plausible range: gamma ∈ [0.45, 2.2]
     """
-    alpha = rng.uniform(0.4, 1.8)
-    beta  = rng.uniform(-30, 30)
-    out   = _clip(img.astype(np.float32) * alpha + beta)
-    return out, {"alpha": round(alpha, 3), "beta": round(beta, 3)}
+    gamma     = rng.uniform(0.45, 2.2)
+    lut       = np.array([(i / 255.0) ** gamma * 255 for i in range(256)], dtype=np.uint8)
+    out       = cv2.LUT(img, lut)
+    return out, {"gamma": round(gamma, 3)}
 
 
 def main():
     test_dir = Path("../data/metal_nut/test").resolve()
     n_samples = 4
-    seed = 43
+    seed = 41
     random_pick = True  # False = first N images
 
     rng = random.Random(seed)
@@ -83,7 +81,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_exposure(img_bgr, rng)
+        aug_bgr, params = apply_gamma(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -92,11 +90,11 @@ def main():
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
         axes[1, i].set_title(
-            f"Exposure Shifted | {cls_name}\nalpha={params['alpha']}, beta={params['beta']}"
+            f"Gamma Shifted | {cls_name}\ngamma={params['gamma']}"
         )
         axes[1, i].axis("off")
 
-        print(f"[{cls_name}] {img_path.name} -> alpha={params['alpha']}, beta={params['beta']}")
+        print(f"[{cls_name}] {img_path.name} -> gamma={params['gamma']}")
 
     plt.tight_layout()
     plt.show()
