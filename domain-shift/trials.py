@@ -42,20 +42,40 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
         return rng.sample(paths, n)
     return paths[:n]
 
-def apply_gamma(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_white_balance(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Gamma correction to simulate different sensor response curves.
+    Per-channel multiplicative drift to simulate white-balance miscalibration.
 
-    gamma < 1  → image brightened (as if sensor is more sensitive)      -- lifts shadows/midtones
-    gamma > 1  → image darkened         -- compresses shadows/midtones
+    Each BGR channel is not scaled independently since Real illuminant shifts 
+    mainly affect the R/B ratio while G stays relatively stable.  Shifts are small and
+    asymmetric so the overall cast is realistic (not rainbow-coloured).
 
-    Industrial case: different camera models (or firmware versions)
-    apply different gamma tables in-sensor. Plausible range: gamma ∈ [0.45, 2.2]
+    Industrial case: switching between fluorescent, LED, halogen and sodium-
+    vapour lighting changes the illuminant spectrum; a fixed white-balance
+    preset introduces a colour cast.
+    Plausible range: per-channel scale ∈ [0.75, 1.25]
     """
-    gamma     = rng.uniform(0.45, 2.2)
-    lut       = np.array([(i / 255.0) ** gamma * 255 for i in range(256)], dtype=np.uint8)
-    out       = cv2.LUT(img, lut)
-    return out, {"gamma": round(gamma, 3)}
+    scale_G = rng.uniform(0.90, 1.10)          # subtle
+    scale_R = rng.uniform(0.70, 1.40)          # warm vs cool shift
+    scale_B = rng.uniform(0.70, 1.40)          # correlated opposite to R
+
+    # for a more realistic effect we anti-correlate R and B to model colour temperature shift
+    # (warm light = more R, less B; cool light = more B, less R)
+    if rng.random() > 0.5:
+        scale_R = rng.uniform(1.1, 1.4)        # warm cast
+        scale_B = rng.uniform(0.7, 0.9)
+    else:
+        scale_R = rng.uniform(0.7, 0.9)        # cool cast
+        scale_B = rng.uniform(1.1, 1.4)
+
+    scales = [scale_B, scale_G, scale_R]
+    out    = img.astype(np.float32).copy()
+    for c, s in enumerate(scales):
+        out[:, :, c] *= s
+    out = _clip(out)
+    return out, {"scale_B": round(scale_B, 3),
+                "scale_G": round(scale_G, 3),
+                "scale_R": round(scale_R, 3)}
 
 
 def main():
@@ -81,7 +101,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_gamma(img_bgr, rng)
+        aug_bgr, params = apply_white_balance(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -90,11 +110,15 @@ def main():
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
         axes[1, i].set_title(
-            f"Gamma Shifted | {cls_name}\ngamma={params['gamma']}"
+            f"White Balance Shifted | {cls_name}\n"
+            f"B={params['scale_B']} G={params['scale_G']} R={params['scale_R']}"
         )
         axes[1, i].axis("off")
 
-        print(f"[{cls_name}] {img_path.name} -> gamma={params['gamma']}")
+        print(
+            f"[{cls_name}] {img_path.name} -> "
+            f"scale_B={params['scale_B']}, scale_G={params['scale_G']}, scale_R={params['scale_R']}"
+        )
 
     plt.tight_layout()
     plt.show()
