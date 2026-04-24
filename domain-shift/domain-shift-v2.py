@@ -36,3 +36,21 @@ def apply_exposure(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
     beta  = rng.uniform(-30, 30)
     out   = _clip(img.astype(np.float32) * alpha + beta)
     return out, {"alpha": round(alpha, 3), "beta": round(beta, 3)}
+
+def apply_gamma(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Gamma correction to simulate different sensor response curves.
+
+    gamma < 1  → image brightened (as if sensor is more sensitive)      -- lifts shadows/midtones
+    gamma > 1  → image darkened         -- compresses shadows/midtones
+
+    Industrial case: different camera models (or firmware versions)
+    apply different gamma tables in-sensor. 
+    Mild miscalibration between camera units (around 1 gamma) or 
+    gamma correction accidentally enabled/disabled (gamma  0.45 or 2.2).
+    Plausible range for fluctations: gamma ∈ [0.45, 2.2]
+    """
+    gamma     = rng.uniform(0.45, 2.2)
+    lut       = np.array([(i / 255.0) ** gamma * 255 for i in range(256)], dtype=np.uint8)
+    out       = cv2.LUT(img, lut)
+    return out, {"gamma": round(gamma, 3)}
