@@ -54,3 +54,31 @@ def apply_gamma(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     lut       = np.array([(i / 255.0) ** gamma * 255 for i in range(256)], dtype=np.uint8)
     out       = cv2.LUT(img, lut)
     return out, {"gamma": round(gamma, 3)}
+
+def apply_white_balance(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Per-channel multiplicative drift to simulate white-balance miscalibration.
+
+    R and B are anti-correlated to model colour temperature shift along the
+    warm/cool axis (warm = more R, less B; cool = more B, less R).
+    G stays nearly stable as cameras are designed around the green channel.
+
+    Industrial case: switching between fluorescent, LED, halogen and sodium-
+    vapour lighting changes the illuminant spectrum; a fixed white-balance
+    preset introduces a colour cast.
+    Plausible range: per-channel scale ∈ [0.75, 1.25]
+    """
+    warm = rng.random() > 0.5          # True → warm cast, False → cool cast
+
+    scale_G = rng.uniform(0.90, 1.10)
+    scale_R = rng.uniform(1.10, 1.40) if warm else rng.uniform(0.70, 0.90)
+    scale_B = rng.uniform(0.70, 0.90) if warm else rng.uniform(1.10, 1.40)
+
+    out = img.astype(np.float32).copy()
+    for c, s in enumerate([scale_B, scale_G, scale_R]):
+        out[:, :, c] *= s
+    out = _clip(out)
+    return out, {"scale_B": round(scale_B, 3),
+                 "scale_G": round(scale_G, 3),
+                 "scale_R": round(scale_R, 3),
+                 "cast":    "warm" if warm else "cool"}
