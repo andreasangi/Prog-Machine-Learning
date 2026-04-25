@@ -42,40 +42,38 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
         return rng.sample(paths, n)
     return paths[:n]
 
-def apply_white_balance(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_noise(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Per-channel multiplicative drift to simulate white-balance miscalibration.
+    Gaussian read-noise + optional salt-and-pepper dead/hot pixels.
 
-    Each BGR channel is not scaled independently since Real illuminant shifts 
-    mainly affect the R/B ratio while G stays relatively stable.  Shifts are small and
-    asymmetric so the overall cast is realistic (not rainbow-coloured).
+    Gaussian sigma models thermal / read noise (low-light or high-gain).
+    Salt-and-pepper fraction models sensor defects or transmission errors.
 
-    Industrial case: switching between fluorescent, LED, halogen and sodium-
-    vapour lighting changes the illuminant spectrum; a fixed white-balance
-    preset introduces a colour cast.
-    Plausible range: per-channel scale ∈ [0.75, 1.25]
+    Industrial justification: industrial cameras operating at high gain
+    (low-light) show significant read noise; older sensors develop dead pixels.
+    Plausible range: sigma ∈ [5, 40], sp_fraction ∈ [0, 0.005]
     """
-    scale_G = rng.uniform(0.90, 1.10)          # subtle
-    scale_R = rng.uniform(0.70, 1.40)          # warm vs cool shift
-    scale_B = rng.uniform(0.70, 1.40)          # correlated opposite to R
+    sigma      = rng.uniform(5, 40)
+    sp_frac    = rng.uniform(0.0, 0.005)
 
-    # for a more realistic effect we anti-correlate R and B to model colour temperature shift
-    # (warm light = more R, less B; cool light = more B, less R)
-    if rng.random() > 0.5:
-        scale_R = rng.uniform(1.1, 1.4)        # warm cast
-        scale_B = rng.uniform(0.7, 0.9)
-    else:
-        scale_R = rng.uniform(0.7, 0.9)        # cool cast
-        scale_B = rng.uniform(1.1, 1.4)
+    # Gaussian
+    noise = np.random.normal(0, sigma, img.shape).astype(np.float32)
+    out   = _clip(img.astype(np.float32) + noise)
 
-    scales = [scale_B, scale_G, scale_R]
-    out    = img.astype(np.float32).copy()
-    for c, s in enumerate(scales):
-        out[:, :, c] *= s
-    out = _clip(out)
-    return out, {"scale_B": round(scale_B, 3),
-                "scale_G": round(scale_G, 3),
-                "scale_R": round(scale_R, 3)}
+    # Salt-and-pepper
+    n_pixels = int(sp_frac * img.shape[0] * img.shape[1])
+    if n_pixels > 0:
+        # Salt (white)
+        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
+        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
+        out[ys, xs] = 255
+        # Pepper (black)
+        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
+        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
+        out[ys, xs] = 0
+
+    return out, {"gaussian_sigma": round(sigma, 2),
+                 "sp_fraction":    round(sp_frac, 5)}
 
 
 def main():
@@ -85,6 +83,7 @@ def main():
     random_pick = True  # False = first N images
 
     rng = random.Random(seed)
+    np.random.seed(seed)
 
     all_paths = collect_test_images(test_dir)
    
@@ -101,7 +100,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_white_balance(img_bgr, rng)
+        aug_bgr, params = apply_noise(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -110,14 +109,14 @@ def main():
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
         axes[1, i].set_title(
-            f"White Balance Shifted | {cls_name}\n"
-            f"B={params['scale_B']} G={params['scale_G']} R={params['scale_R']}"
+            f"Noise Shifted | {cls_name}\n"
+            f"sigma={params['gaussian_sigma']} sp={params['sp_fraction']}"
         )
         axes[1, i].axis("off")
 
         print(
             f"[{cls_name}] {img_path.name} -> "
-            f"scale_B={params['scale_B']}, scale_G={params['scale_G']}, scale_R={params['scale_R']}"
+            f"gaussian_sigma={params['gaussian_sigma']}, sp_fraction={params['sp_fraction']}"
         )
 
     plt.tight_layout()
