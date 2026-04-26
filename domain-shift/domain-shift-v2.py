@@ -82,3 +82,36 @@ def apply_white_balance(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray
                  "scale_G": round(scale_G, 3),
                  "scale_R": round(scale_R, 3),
                  "cast":    "warm" if warm else "cool"}
+
+def apply_noise(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Gaussian read-noise + optional salt-and-pepper dead/hot pixels.
+
+    Gaussian sigma models thermal (read) noise (low-light or high-gain).
+    Salt-and-pepper fraction models sensor defects, hot/dead pixels.
+
+    Industrial case: industrial cameras operating at high gain
+    (low-light) show significant read noise, and older sensors develop dead pixels.
+    Plausible range: sigma ∈ [5, 40], sp_fraction ∈ [0, 0.005]
+    """
+    sigma      = rng.uniform(5, 40)
+    sp_frac    = rng.uniform(0.0, 0.005)
+
+    # Gaussian
+    noise = np.random.normal(0, sigma, img.shape).astype(np.float32)
+    out   = _clip(img.astype(np.float32) + noise)
+
+    # Salt-and-pepper
+    n_pixels = int(sp_frac * img.shape[0] * img.shape[1])
+    if n_pixels > 0:
+        # Salt (white)
+        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
+        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
+        out[ys, xs] = 255
+        # Pepper (black)
+        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
+        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
+        out[ys, xs] = 0
+
+    return out, {"gaussian_sigma": round(sigma, 2),
+                 "sp_fraction":    round(sp_frac, 5)}
