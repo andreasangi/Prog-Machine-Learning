@@ -115,3 +115,19 @@ def apply_noise(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
 
     return out, {"gaussian_sigma": round(sigma, 2),
                  "sp_fraction":    round(sp_frac, 5)}
+
+def apply_jpeg(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Simulate JPEG compression artifacts by encoding and re-decoding.
+
+    Lower quality → stronger block artifacts (8×8 DCT blocks visible).
+
+    Industrial case: images transmitted over network links (GigE
+    Vision with software compression, or IP cameras) are often JPEG-encoded.
+    Plausible range: quality ∈ [20, 60]
+    """
+    quality = rng.randint(20, 60)
+    _, buf  = cv2.imencode('.jpg', img,
+                           [cv2.IMWRITE_JPEG_QUALITY, quality])
+    out     = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    return out, {"jpeg_quality": quality}
