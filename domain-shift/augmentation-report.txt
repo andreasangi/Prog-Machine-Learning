@@ -1,0 +1,247 @@
+realistic illumination changes
+	exposure 	--	short timing short exposure, needs a lot of light
+	white balance	-- 	
+	reflection      --
+
+sensor noise
+
+mild blur 	
+	can happen when th eobject is not perfectly still, moving object/vibrations....
+
+defocus
+	different object height on same tapis
+
+image distortion, artifacts, aliasing
+
+compression artifacts
+
+viewpoint / misalignment
+
+color / contrast drift
+
+
+Available modes
+---------------
+    exposure    Brightness / exposure shift (under- and over-exposure)
+    gamma       Gamma correction (sensor response curve variation)
+    wb          White balance / color channel drift
+    noise       Gaussian sensor noise  +  salt-and-pepper dead pixels
+    jpeg        JPEG compression artifacts
+    blur        Motion blur  +  defocus blur
+    vignette    Lens vignetting (radial illumination falloff)
+    shadow      Directional gradient shadow (uneven scene lighting)
+    contrast    CLAHE contrast drift (AGC simulation)
+    affine      Small affine misalignment (translation, rotation, shear)
+    perspective Mild perspective warp (camera tilt)
+    specular    Specular / glare hotspot (glossy surfaces)
+    combined    Random subset of all transforms applied together
+
+
+
+------------------------------------------------------
+
+	EXPOSURE
+
+------------------------------------------------------
+
+Simulate exposure variation via linear scaling.
+    NEW_PIXEL = alpha * OLD_PIXEL + beta
+
+    alpha < 1  -> under-exposure (e.g. insufficient light, fast shutter)
+    alpha > 1  -> over-exposure (e.g. blown highlights, long exposure)
+    beta       -> additive offset (dark current / ambient offset)
+
+    Industrial justification: line lighting intensity varies with voltage
+    fluctuations, lamp aging, and controller settings.
+    Plausible range: alpha [0.5, 1.7], beta [-30, 30]
+
+
+A basic camera intensity model is:
+
+MEASURED_INTENSITY =similar= GAIN * SCENE_INTENSITY + OFFSET + NOISE
+
+	ALPHA ca. GAIN
+	BETA ca. OFFSET
+	NOISE not included yet 
+
+possible scenarios:
+	lamp aging/replacement
+	maintenance/human moving the setup
+	auto exposure
+	conveyor speed (blur) variation
+
+------------------------------------------------------
+
+	GAMMA CORRECITON
+
+------------------------------------------------------
+
+what is gamma:
+	https://homepages.inf.ed.ac.uk/rbf/CVonline/LOCAL_COPIES/POYNTON2/GammaFAQ.html
+
+Gamma correction models the nonlinear relationship between actual light intensity and pixel value. Camera sensors are roughly linear (double the photons, double the voltage) but displays and human vision are not. So manufacturers bake a gamma curve into the sensor firmware to compensate. Different cameras use different curves.
+
+	 for each pixel value i in [0, 255], the new value is (i/255)^gamma * 255
+
+So 0.45 means "gamma encoding applied but never decoded" and 2.2 means "gamma decoded but never encoded" — these are the two failure modes of a completely misconfigured pipeline end-to-end. They are extreme, almost worst-case scenarios. For a domain shift experiment on an industrial line, these are not realistic: no sane camera deployment would be that far off.
+
+industrial cameras naturally have a gamma of 1, meaning they are linear in response by default. Displays can have a nonlinear response between 2 and 3, and the camera may optionally incorporate gamma correction to compensate when used together with a display -- edmundoptics
+
+Industrial machine vision cameras are typically configured to output linear images. realistic domain shift scenarios are:
+
+	someone accidentally enables the gamma correction setting on the camera (gamma goes from 1.0 to ~0.45 or ~0.5
+	
+	Different camera model from a different vendor ships with a slightly different tone curve baked in (gamma = 0.8 or 1.2)
+	
+	Camera firmware is updated and default gamma setting changes subtly
+
+
+------------------------------------------------------
+
+	WHITE BALANCE
+
+------------------------------------------------------
+
+Per-channel diagonal scaling is the standard model for illuminant change
+
+As a white light source's colour temperature rises in Kelvins, there is more blue content, resulting in a "cool" white. When the colour temperature is lower, there is more red light, perceived as a "warm" white. White LED lamps are produced by blue LEDs combined with a phosphor layer, and different phosphor chemistries produce different colour temperature profiles with varying balances of blue peak and red-orange content.
+higher R → lower B (warm, low CCT) and higher B → lower R (cool, high CCT). G stays relatively stable because it sits in the middle of the spectrum and is less affected by the warm/cool axis — which is also why camera sensors are designed with the Bayer filter giving twice as many green pixels as red or blue.
+
+going from a 3000K warm LED (common in older factory installations) to a 6000K cool LED (common in modern inspection lighting) is roughly a factor of 2 in the R/B ratio. Artificial light colour temperature is typically found in the range between 2700K and 6500K, with light appearing cooler and bluer as the Kelvin value increases.ange of 0.70–1.40 on R and B — giving a maximum R/B ratio of 2.0 — covers this full span of realistic industrial illuminants 
+
+
+------------------------------------------------------
+
+	GAUSS NOISE / SALT-PEPPER
+
+------------------------------------------------------
+
+
+    Gaussian read-noise + optional salt-and-pepper dead/hot pixels.
+
+    Gaussian sigma models thermal / read noise (low-light or high-gain).
+    Salt-and-pepper fraction models sensor defects or transmission errors.
+
+    Industrial case: industrial cameras operating at high gain
+    (low-light) show significant read noise, and older sensors develop dead pixels.
+
+The physical origin is the camera sensor itself. When light hits a photosite on a CCD or CMOS sensor, it generates electrons, this is the photoelectric effect. The count of electrons is then converted to a voltage and digitized to a pixel value. Two unavoidable noise sources contaminate this process at the hardware level:
+
+	- Shot noise ==>	comes from the quantum nature of light itself. Even under perfectly stable illumination, 
+		the number of photons arriving per unit time fluctuates according to a Poisson distribution. 
+		At high light levels this is negligible (Poisson approaches Gaussian for large counts), but at low light it dominates
+
+	- Read noise ==>	  (also called thermal noise or Johnson-Nyquist noise) comes from the random thermal motion of electrons 
+			in the sensor circuitry during the analog-to-digital conversion step. It is well modelled as additive 
+			zero-mean Gaussian noise, independent of the signal level. 
+
+			It is well modelled as additive zero-mean Gaussian noise, independent of the signal level, like th efunction does
+			Zero mean means the noise does not systematically bias the image brighter or darker, it adds random fluctuations symmetrically 
+			above and below the true pixel value. Sigma controls the standard deviation , how wide the fluctuations are. 
+			The higher the camera gain (ISO analog in industrial cameras), the larger sigma becomes,
+			
+			The additive model output = signal + noise is called the AWGN model (Additive White Gaussian Noise), it's a first-order model 
+			for sensor noise, "White" here means the noise is spectrally flat so uncorrelated between pixels, with no spatial structure
+
+			Range sigma [5, 40] 8bit px --> sigma = 5: SNR ca. 34 dB - good industrial cam, good light
+						    --> sigma = 40: SNR ca. 16 dB - amera pushed to high gain in poor light, or a cheap sensor
+
+	Poisson shot noise: more accurate than Gaussian for low photon counts,  requires careful scaling. 
+		===  	The Gaussian approximation is adequate for 8-bit imagery at reasonable light levels 	===
+
+
+============ Salt-and-pepper noise — modelling dead and hot pixels ===========
+
+Individual photosites on a sensor can fail permanently :
+
+		Dead pixels (pepper - black): 	the photosite produces zero output regardless of illumination, because the photodiode 
+						is damaged or the readout circuit is broken. They appear as permanently black dots
+
+
+		Hot pixels (salt — white): 		the photosite has excessive dark current, it generates electrons even with no light, saturating to maximum 
+						value. They appear as permanently white dots.  Hot pixels worsen with sensor temperature and sensor age.
+
+				hot pixels are actually a continuous spectrum, not binary, some pixels are just slightly elevated, not fully saturated. 					The binary model is a simplification
+
+
+	range sp_frac ca. [0, 0.005] means between 0 and 0.5% of pixels are defective, which is realistic. Camera manufacturers typically specify 
+	a maximum dead pixel count in their datasheets, often around 0.1–0.5% for industrial sensors.
+
+In a real sensor both are always present simultaneously — you always have read noise (Gaussian, continuous) and potentially some dead pixels (salt-and-pepper, discrete). Separating them into two independent transforms would be less physically realistic. The combined function models "one sensor acquisition" as a single unit.
+
+Janesick, J.R. — Scientific Charge-Coupled Devices, SPIE Press, 2001. The standard reference on CCD noise physics — shot noise, read noise, dark current, fixed pattern noise are all derived from first principles. 	Chapter 3 covers the noise model
+
+Foi, A., Trimeche, M., Katkovnik, V., Egiazarian, K. — "Practical Poissonian-Gaussian Noise Modeling and Fitting for Single-Image Raw-Data", IEEE Transactions on Image Processing, Vol. 17, No. 10, 2008. DOI: 10.1109/TIP.2008.2001399. 		This is the paper that establishes the Poissonian-Gaussian as the correct combined model for real camera noise, and shows when the Gaussian approximationis adequate
+
+Healey, G.E. & Kondepudy, R. — "Radiometric CCD Camera Calibration and Noise Estimation", IEEE Transactions on Pattern Analysis and Machine Intelligence, Vol. 16, No. 3, 1994. 		Establishes the AWGN model for industrial CCD cameras specifically, closer to our use case than general photography papers.
+
+
+------------------------------------------------------
+
+	JPEG COMPRESSION
+
+------------------------------------------------------
+
+encodes the image to a JPEG byte buffer in memory using cv2.imencode, then immediately decodes it back to a pixel array with cv2.imdecode. The image is never written to disk: the round-trip happens entirely in RAM. The result is an image that has been through JPEG compression and decompression, carrying all the artifacts that process introduces.
+
+sOME CAMERAS IMPLEMENT jpeg COMPRESSION DIRECTLY INTO THE CAMERA fpga (bAUMER)
+
+The quality range [20, 60] was selected to cover the operating range of industrial cameras with integrated JPEG compression. Baumer documentation specifies that quality sufficient for many applications corresponds to approximately 10:1 compression ratio (quality ≈ 60), while ratios above 15:1 introduce visible blocking and edge artefacts (quality ≈ 30). The lower bound of 20 represents an extreme bandwidth-constrained scenario approaching the 35:1 ratio documented as the limit for acceptable colour image quality in industrial deployments. This range therefore spans from moderate operational compression to severe bandwidth limitation.
+
+	Block artifacts (8x8 boundaries)
+	Ringing near edges
+	Smearing of high-frequency details (tiny scratches/textures)
+	Color degradation/chroma loss (depending on encoder defaults)
+
+Real cases in idustrial applciation:
+
+	IP camera streams compressed JPEG/MJPEG
+	PLC/edge device compresses frames before storage
+	Network bandwidth limits force lower quality
+	Logging/export pipeline re-encodes images
+	Different firmware defaults for compression quality/subsampling
+All common in production environments.
+
+from  Baumer : 
+https://www.baumer.com/us/en/service-support/technology-highlights/industrial-cameras-with-integrated-jpeg-image-compression/a/JPEG-image-compression
+
+from Basler:
+https://www.baslerweb.com/en/use-cases/jpeg-compression/
+
+
+------------------------------------------------------
+
+	BLUR
+
+------------------------------------------------------
+
+Motion blur occurs when there is relative movement between the camera and the object during the exposure window. 
+The sensor integrates light over the entire exposure time, so if the object moves, each point in the scene 
+traces a path across the sensor and the recorded pixel is the average of all positions along that path.
+
+The mathematical model is a convolution. If the object moves in a straight line during exposure, the 
+point spread function (PSF) (the blur kernel) is a line segment of length L pixels at angle θ. 
+Every pixel in the output is the average of L input pixels along that direction
+	output(x,y) = (1/L)  sum (input(x + t cosθ, y + t sinθ) )  for t  [0, L]
+
+build a horizontal line of ones divided by L, then rotate it to angle θ using warpAffine
+
+The two physical causes in your industrial context are distinct. 
+	Conveyor vibration: the tapis vibrates at its mechanical resonance (typically 10–100 Hz). If exposure time is long relative to the 
+	vibration period, the object traces a small arc, butlinear approximation holds for small amplitudes. 
+
+	Object not frozen: if the part is moving along the belt and exposure is too slow to freeze it, you get directional blur 
+	aligned with belt direction, predominantly horizontal. uniform angle  [0°, 180°] is generous, in practice belt motion blur clusters near horizontal
+
+========== DEFOCUS BLUR =========
+
+Parts with varying heights presented to a camera focused at nominal height will be defocused proportionally to their height deviation from the focal plane.
+
+when the object is not at the focal plane. A lens focuses a point source at exactly one distance to a single point on the sensor. 
+At any other distance, the point spreads into the circle of confusion.
+
+the geometrically correct PSF is a flat disk, the pillbox function, however a Gaussian is the standard approximation
+	sigma * 6 kernel size captures 3 standard deviations per side, containing 99.7% of the Gaussian energy which is correct and standard. 
+	The | 1 forces odd size for a centred kernel
+
+"Defocus blur was modelled using a Gaussian PSF, which is a standard approximation to the geometrically correct pillbox PSF and is accurate for the mild-to-moderate defocus levels considered here."

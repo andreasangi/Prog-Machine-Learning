@@ -42,44 +42,59 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
         return rng.sample(paths, n)
     return paths[:n]
 
-def apply_noise(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_blur(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Gaussian read-noise + optional salt-and-pepper dead/hot pixels.
+    Motion blur (directional) OR defocus blur (isotropic), chosen randomly.
 
-    Gaussian sigma models thermal / read noise (low-light or high-gain).
-    Salt-and-pepper fraction models sensor defects or transmission errors.
+    Motion blur:   linear kernel at a random angle -
+                   models conveyor, camera vibration or object not perfectly still during exposure.
+    Defocus blur:  Gaussian kernel
+                   Object not on focal plane,
+                   models depth-of-field variation when objects have different 
+                   heights on the inspection tapis.
 
-    Industrial justification: industrial cameras operating at high gain
-    (low-light) show significant read noise; older sensors develop dead pixels.
-    Plausible range: sigma ∈ [5, 40], sp_fraction ∈ [0, 0.005]
+    Plausible kernel sizes: motion length ∈ [5, 25 px], angle ∈ [0°, 180°]
+                            defocus sigma ∈ [1.5, 6.0]
     """
-    sigma      = rng.uniform(5, 40)
-    sp_frac    = rng.uniform(0.0, 0.005)
+    kind = rng.choice(["motion", "defocus"])
+    params: dict = {"kind": kind}
 
-    # Gaussian
-    noise = np.random.normal(0, sigma, img.shape).astype(np.float32)
-    out   = _clip(img.astype(np.float32) + noise)
+    if kind == "motion":
+        length = rng.randint(5, 25)
+        angle  = rng.uniform(0, 180)
+        params.update({"length": length, "angle_deg": round(angle, 1)})
 
-    # Salt-and-pepper
-    n_pixels = int(sp_frac * img.shape[0] * img.shape[1])
-    if n_pixels > 0:
-        # Salt (white)
-        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
-        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
-        out[ys, xs] = 255
-        # Pepper (black)
-        ys = np.random.randint(0, img.shape[0], n_pixels // 2)
-        xs = np.random.randint(0, img.shape[1], n_pixels // 2)
-        out[ys, xs] = 0
+        # Build a line at the desired angle to create the kernel
+        kernel = np.zeros((length, length), dtype=np.float32)
+        cx, cy = length // 2, length // 2
+        angle_rad = np.deg2rad(angle)
+        x1 = int(cx - (length // 2) * np.cos(angle_rad))
+        y1 = int(cy - (length // 2) * np.sin(angle_rad))
+        x2 = int(cx + (length // 2) * np.cos(angle_rad))
+        y2 = int(cy + (length // 2) * np.sin(angle_rad))
+        cv2.line(kernel, (x1, y1), (x2, y2), 1.0, 1)
 
-    return out, {"gaussian_sigma": round(sigma, 2),
-                 "sp_fraction":    round(sp_frac, 5)}
+        kernel  = kernel / kernel.sum()             # re-normalise after rotation
+            # warpAffine uses bilinear interpolation when rotating, which distributes energy 
+            # across neighbouring pixels and can reduce the kernel sum below 1, causing 
+            # the blurred image to darken slightly
+
+        out     = cv2.filter2D(img, -1, kernel)
+
+    else:  # defocus
+        sigma = rng.uniform(1.5, 6.0)
+        ksize = int(sigma * 6) | 1                 # must be odd
+        params.update({"sigma": round(sigma, 2), "ksize": ksize})
+        out   = cv2.GaussianBlur(img, (ksize, ksize), sigma)
+
+    return out, params
+
 
 
 def main():
     test_dir = Path("../data/metal_nut/test").resolve()
     n_samples = 4
-    seed = 41
+    seed = 47
     random_pick = True  # False = first N images
 
     rng = random.Random(seed)
@@ -100,7 +115,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_noise(img_bgr, rng)
+        aug_bgr, params = apply_blur(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -108,16 +123,26 @@ def main():
         axes[0, i].axis("off")
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
+        if params["kind"] == "motion":
+            subtitle = f"motion | len={params['length']} angle={params['angle_deg']}°"
+        else:
+            subtitle = f"defocus | sigma={params['sigma']} k={params['ksize']}"
+
         axes[1, i].set_title(
-            f"Noise Shifted | {cls_name}\n"
-            f"sigma={params['gaussian_sigma']} sp={params['sp_fraction']}"
+            f"Blur Shifted | {cls_name}\n{subtitle}"
         )
         axes[1, i].axis("off")
 
-        print(
-            f"[{cls_name}] {img_path.name} -> "
-            f"gaussian_sigma={params['gaussian_sigma']}, sp_fraction={params['sp_fraction']}"
-        )
+        if params["kind"] == "motion":
+            print(
+                f"[{cls_name}] {img_path.name} -> "
+                f"kind=motion, length={params['length']}, angle_deg={params['angle_deg']}"
+            )
+        else:
+            print(
+                f"[{cls_name}] {img_path.name} -> "
+                f"kind=defocus, sigma={params['sigma']}, ksize={params['ksize']}"
+            )
 
     plt.tight_layout()
     plt.show()
