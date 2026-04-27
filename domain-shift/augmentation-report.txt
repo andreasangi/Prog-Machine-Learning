@@ -245,3 +245,74 @@ the geometrically correct PSF is a flat disk, the pillbox function, however a Ga
 	The | 1 forces odd size for a centred kernel
 
 "Defocus blur was modelled using a Gaussian PSF, which is a standard approximation to the geometrically correct pillbox PSF and is accurate for the mild-to-moderate defocus levels considered here."
+
+The point spread function (PSF) of a linear motion blur distortion is a line segment. Such a PSF is specified by two parameters: 
+ length	 is the length of the blur and 
+ theta 	is the angle of motion.
+
+The blur in pixels is calculated as: B = Vp × Te × Np / FOV, where Vp is part velocity, Te is exposure time, Np is number of pixels spanning the field of view, and FOV is the field of view in the direction of motion. As an example, with Vp = 1 cm/sec, Te = 33ms, Np = 640 pixels and FOV = 10cm, the result is B = 2.1 pixels. In most cases, blurring becomes an issue past 1 pixel. ResearchGate
+This formula is your anchor. Applying it to a realistic MVTec-scale scenario — say a 900px image covering 100mm, belt speed 200mm/s, exposure 5ms — gives B = 200 × 0.005 × 900 / 100 = 9 pixels. At 600mm/s with a 10ms exposure it gives 54 pixels. So your range of [5, 25] covers well-configured to moderately misconfigured systems. This is directly supported.
+A typical conveyor belt inspection scenario: if the conveyor belt runs at 1 m/s and the camera's exposure time is 10ms, during a single exposure the object will move 10mm. This amount of displacement creates visible motion blur. Semantic Scholar At 900px over 100mm field of view, 10mm displacement = 90 pixels — that is an extreme case, beyond your upper bound of 25px, which further justifies 25px as a moderate rather than extreme value.
+
+https://www.1stvision.com/machine-vision-solutions/2018/06/industrial-camera-exposure-time.html
+
+The CoC formula is:
+CoC = (aperture_diameter × |Δh|) / object_distance
+where Δh is the height deviation from the focal plane. In pixel units:
+CoC_px = CoC_mm × (sensor_pixels / sensor_width_mm)
+And sigma of your Gaussian approximation is roughly:
+sigma ≈ CoC_px / 2
+Now plug in realistic numbers for MVTec metal_nut. MVTec images are 900×900px, and based on the MVTec paper the inspection distance is macro range — roughly 300mm working distance, f/8 aperture, 50mm focal length — giving a pixel pitch around 0.05–0.1mm/px. Let's use 0.07mm/px as a midpoint.
+For part height variation: standard metric hex nut thickness per ISO 4032 for M8 is 6.44–6.80mm, and for M10 is 8.04–8.40mm ProSensus — that's a within-spec variation of 0.36–0.36mm just between individual nuts of the same nominal size. Between different sizes mixed on the same line the variation is several millimetres. For defective nuts — the bent and flipped categories in MVTec — the effective height presented to the camera can vary by 1–3mm easily.
+So:
+Height deviation ΔhCoC (mm)CoC (px) at 0.07mm/pxsigma ca CoC/20.5 mm~0.08 mm~1.2 px~0.61.0 mm~0.16 mm~2.3 px~1.12.0 mm~0.32 mm~4.6 px~2.35.0 mm~0.80 mm~11.4 px~5.7
+Your lower bound sigma = 1.5 corresponds to a height deviation of about 1.5mm — a nut sitting slightly tilted. Your upper bound sigma = 6.0 corresponds to roughly 5mm height deviation — a badly presented part or a completely wrong orientation. Both are physically plausible.
+The standard machine vision CoC tolerances are: 1 pixel for precision measurement and barcode reading, 2 pixels for standard machine vision tasks, and 4 pixels for acceptable object detection and tracking. Academia.edu Translating: sigma = 1.5 (CoC ≈ 3px) sits just above the "standard tasks" threshold, sigma = 6.0 (CoC ≈ 12px) is well beyond even the most lenient criterion. Your range therefore spans from just-detectable defocus to severely degraded — which is exactly what you want.
+
+"Defocus blur was modelled using a Gaussian PSF with sigma ∈ [1.5, 6.0] pixels. This range was derived from the circle of confusion formula CoC = D × Δh / d, where D is the effective aperture diameter, Δh is the height deviation from the focal plane, and d is the working distance. For a representative macro inspection setup (f/8, 50mm focal length, 300mm working distance, 0.07mm/px resolution), sigma = 1.5 corresponds to a part height deviation of approximately 1.5mm — within the within-spec thickness variation of standard metric hex nuts per ISO 4032 — and sigma = 6.0 corresponds to approximately 5mm deviation, representing severely misoriented parts. This range spans from just above the standard machine vision CoC threshold of 2px (Commonlands, 2024) to well beyond the most lenient 4px criterion for object detection tasks."
+
+------------------------------------------------------
+
+	VIGNETTING
+
+------------------------------------------------------
+
+The mask is applied identically to all three BGR channels, which is physically correct, since natural vignetting is a geometric light-blocking effect, not a spectral one. It attenuates all wavelengths equally.
+
+Natural vignetting -- the cos⁴ law
+			fundamental and unavoidable in any lens system. The illuminance at a point on the sensor at angle θ from the optical axis falls as: E(θ) = E(0) × cos⁴(θ)
+			At θ = 30° — typical for a moderate field-of-view machine vision lens -- cos⁴(30°) ≈ 0.56, meaning the corner receives only 56% of the centre illuminance. 
+			That is already nearly 1 stop of falloff from physics alone, before any manufacturing or design factors.
+			Gaussian mask approximates this cos⁴ profile. The cos⁴ law produces a slightly flatter centre and harder roll-off than a Gaussian, 
+			but for simulation it's ok, visually indistinguishable
+			I ONLY MODEL THIS ONE WITH THE GAUSSIAN
+
+Optical vignetting -- The front lens elements partially eclipse the entrance pupil for oblique rays — off-axis beams see a smaller effective aperture than on-axis beams. 
+			This is aperture-dependent: it reduces when you stop down, which is why machine vision lenses are often operated at f/5.6–f/8 to minimise it. 
+			At large apertures (f/1.4–f/2) it can add another 0.5–1 stop on top of natural vignetting.
+
+Mechanical vignetting -- The physical lens barrel, filter ring, or lens hood blocks the most oblique rays entirely, producing a harder-edged darkening. 	
+
+
+https://www.edmundoptics.com/knowledge-center/application-notes/imaging/sensor-relative-illumination-roll-off-and-vignetting/
+
+Edmund Optics measured relative illumination (RI) of 57% at the corner of a 2/3" sensor for a typical machine vision lens at f/1.4, and 72% at the corner of a 1/2" sensor under the same conditions. RI improves as f-number increases, but roll-off related to ray angles persists even when stopped down
+strength parameter directly encodes corner RI as corner_value = 1 - strength. So the measured Edmund Optics values map to:
+
+Measured RI			strength equivalent		Real-world case72% 
+(f/1.4, small sensor)		0.2			8Good match, small sensor
+57% (f/1.4, 2/3" sensor)		0.43			Typical machine vision lens wide open
+40% (~1.3 stops)			0.60			Budget lens or slight sensor mismatch
+20% (~2.3 stops)			0.80			Fast lens wide open, large sensor
+
+lower bound of 0.3 is slightly below the best measured case (0.28), and upper bound of 0.8 corresponds to severe vignetting from either a fast lens at maximum aperture or a lens-sensor format mismatch. 
+The range is directly grounded in Edmund Optics measured data.
+
+sigma_frac controls the shape of this curve in the Gaussian approximation
+
+
+-----------------------------------------------------
+
+	SHADOW
+
+------------------------------------------------------
