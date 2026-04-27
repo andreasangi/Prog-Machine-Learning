@@ -131,3 +131,50 @@ def apply_jpeg(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
                            [cv2.IMWRITE_JPEG_QUALITY, quality])
     out     = cv2.imdecode(buf, cv2.IMREAD_COLOR)
     return out, {"jpeg_quality": quality}
+
+def apply_blur(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Motion blur (directional) OR defocus blur (isotropic), chosen randomly.
+
+    Motion blur:   linear kernel at a random angle -
+                   models conveyor, camera vibration or object not perfectly still during exposure.
+    Defocus blur:  Gaussian kernel
+                   Object not on focal plane,
+                   models depth-of-field variation when objects have different 
+                   heights on the inspection tapis.
+
+    Plausible kernel sizes: motion length ∈ [5, 25 px], angle ∈ [0°, 180°]
+                            defocus sigma ∈ [1.5, 6.0]
+    """
+    kind = rng.choice(["motion", "defocus"])
+    params: dict = {"kind": kind}
+
+    if kind == "motion":
+        length = rng.randint(5, 25)
+        angle  = rng.uniform(0, 180)
+        params.update({"length": length, "angle_deg": round(angle, 1)})
+
+        # Build a line at the desired angle to create the kernel
+        kernel = np.zeros((length, length), dtype=np.float32)
+        cx, cy = length // 2, length // 2
+        angle_rad = np.deg2rad(angle)
+        x1 = int(cx - (length // 2) * np.cos(angle_rad))
+        y1 = int(cy - (length // 2) * np.sin(angle_rad))
+        x2 = int(cx + (length // 2) * np.cos(angle_rad))
+        y2 = int(cy + (length // 2) * np.sin(angle_rad))
+        cv2.line(kernel, (x1, y1), (x2, y2), 1.0, 1)
+
+        kernel  = kernel / kernel.sum()             # re-normalise after rotation
+            # warpAffine uses bilinear interpolation when rotating, which distributes energy 
+            # across neighbouring pixels and can reduce the kernel sum below 1, causing 
+            # the blurred image to darken slightly
+
+        out     = cv2.filter2D(img, -1, kernel)
+
+    else:  # defocus
+        sigma = rng.uniform(1.5, 6.0)
+        ksize = int(sigma * 6) | 1                 # must be odd
+        params.update({"sigma": round(sigma, 2), "ksize": ksize})
+        out   = cv2.GaussianBlur(img, (ksize, ksize), sigma)
+
+    return out, params
