@@ -178,3 +178,40 @@ def apply_blur(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
         out   = cv2.GaussianBlur(img, (ksize, ksize), sigma)
 
     return out, params
+
+def apply_vignette(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Apply a smooth radial brightness falloff (vignetting) that darkens toward the image corners.
+
+    Implemented as a 2D Gaussian mask centred at (cx, cy) with spread sigma.
+    Strength parameter controls how dark the corners get.
+
+    Industrial case: all lenses exhibit natural vignetting;
+    many real camera+lens systems exhibit relative-illumination roll-off toward the
+    periphery due to optical and mechanical vignetting; severity depends on 
+    lens design, aperture, and sensor/lens matching.
+    Plausible range: strength ∈ [0.3, 0.8], sigma_frac ∈ [0.5, 0.9]
+    """
+    h, w   = img.shape[:2]
+    strength    = rng.uniform(0.3, 0.8)   # how dark corners get (0 = no effect)
+    sigma_frac  = rng.uniform(0.5, 0.9)   # Gaussian spread as fraction of image size
+
+    sigma_x = w * sigma_frac
+    sigma_y = h * sigma_frac
+    cx, cy  = w / 2, h / 2
+
+    xs = np.arange(w, dtype=np.float32)
+    ys = np.arange(h, dtype=np.float32)
+    X, Y = np.meshgrid(xs, ys)
+
+    # 2D Gaussian mask with centre=1 and corners approaching (1 - strength)
+    mask = np.exp(-((X - cx) ** 2 / (2 * sigma_x ** 2) +
+                    (Y - cy) ** 2 / (2 * sigma_y ** 2)))
+
+    # Scale mask so centre = 1 and corners = (1 - strength)
+    mask = 1.0 - strength * (1.0 - mask)
+    mask = mask[:, :, np.newaxis]            # broadcast over channels
+
+    out = _clip(img.astype(np.float32) * mask)
+    return out, {"strength":   round(strength, 3),
+                 "sigma_frac": round(sigma_frac, 3)}
