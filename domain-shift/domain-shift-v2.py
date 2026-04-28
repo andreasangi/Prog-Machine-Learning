@@ -257,3 +257,5 @@ def apply_shadow(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]
     out = _clip(img.astype(np.float32) * scale)
     return out, {"direction": direction, "dark_side": dark_side,
                  "intensity": round(intensity, 3)}
+
+

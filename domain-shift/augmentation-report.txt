@@ -296,6 +296,8 @@ Mechanical vignetting -- The physical lens barrel, filter ring, or lens hood blo
 
 https://www.edmundoptics.com/knowledge-center/application-notes/imaging/sensor-relative-illumination-roll-off-and-vignetting/
 
+https://www.e-consystems.com/blog/camera/technology/what-is-lens-vignetting-and-how-to-eliminate-it-in-embedded-cameras/
+
 Edmund Optics measured relative illumination (RI) of 57% at the corner of a 2/3" sensor for a typical machine vision lens at f/1.4, and 72% at the corner of a 1/2" sensor under the same conditions. RI improves as f-number increases, but roll-off related to ray angles persists even when stopped down
 strength parameter directly encodes corner RI as corner_value = 1 - strength. So the measured Edmund Optics values map to:
 
@@ -310,9 +312,55 @@ The range is directly grounded in Edmund Optics measured data.
 
 sigma_frac controls the shape of this curve in the Gaussian approximation
 
+In industrial quality inspection, a tiny flaw at the edge of an image may go undetected by the algorithm due to insufficient lighting caused by vignetting, leading to missed product inspections. Vignetting disrupts image uniformity, causing variations in brightness and contrast across different image regions that pose significant challenges for defect detection algorithms.
+
 
 -----------------------------------------------------
 
 	SHADOW
 
 ------------------------------------------------------
+
+It simulates uneven illumination in the scene caused by a single off‑axis light source.
+
+The function simulates uneven illumination by building a linear brightness ramp across the image and multiplying every pixel by it. 
+The ramp goes from full brightness on one side to (1 - intensity) on the other, so if intensity = 0.4, the dark edge retains 60% of its original value. 
+The centre gets 80%. No pixel is ever brightened, only attenuated, which is physically correct for a shadow
+
+possible causes: lamp repositioning or replacement
+			Single-sided ring light failure
+			Conveyor edge shadow: 	the side walls of a conveyor or the part fixture itself can cast a directional shadow
+			Factory window light
+
+The linear approximation is justified by the small FOV. Over a 100mm inspection window, even a point source 500mm away produces a gradient that deviates from linear by less than 2%
+
+Wu, Gao & Xu, "Uneven illumination surface defects inspection based on convolutional neural network", arXiv 1905.06683
+
+intensity range [0.2, 0.6]
+This means the dark edge retains between 40% and 80% of its original brightness
+
+
+-----------------------------------------------------
+
+	CLAHE - CONTRAST
+
+------------------------------------------------------
+
+
+The problem with global HE: it computes one transform for the whole image. If one region is dark and another is bright, the same transform is applied to both, which can severely over-enhance some regions and wash out others. It is also very sensitive to outliers
+AHE fixes the global problem by dividing the image into tiles and computing a separate histogram equalization for each tile. Each pixel is enhanced based on the local statistics of its neighbourhood. 
+The problem with AHE: in uniform regions (flat surfaces, backgrounds) the local histogram is very narrow and the equalization amplifies noise catastrophically.
+
+CLAHE adds one crucial modification: it clips the histogram before computing the CDF. Any histogram bin that exceeds clip_limit gets its excess redistributed uniformly across all other bins before equalization. This prevents any single intensity level from dominating the transform, which limits how aggressively low-contrast regions get enhanced.
+
+CLAHE was originally developed for medical imaging and proven successful for enhancement of low-contrast images. It overcomes the limitations of standard histogram equalization by combining adaptive local processing with a contrast-limiting mechanism.
+
+Zuiderveld, K.J. — "Contrast Limited Adaptive Histogram Equalization", Graphics Gems IV, Academic Press, 1994, pp. 474–485.
+https://www.cse.unr.edu/~bebis/CS474/StudentPaperPresentations/1994%20-%20CLAHE.pdf
+
+
+
+
+
+
+
