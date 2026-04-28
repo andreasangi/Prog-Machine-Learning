@@ -215,3 +215,45 @@ def apply_vignette(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
     out = _clip(img.astype(np.float32) * mask)
     return out, {"strength":   round(strength, 3),
                  "sigma_frac": round(sigma_frac, 3)}
+
+
+def apply_shadow(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Directional gradient shadow: a linear brightness ramp across the image.
+
+    Models uneven scene illumination from a single off-axis light source. 
+
+    Industrial case: lamp repositioning or replacement, single-sided ring light failure,
+                    conveyor edge shadow, factory window light...
+
+    direction: 'horizontal' | 'vertical' | 'diagonal'
+    dark_side:  which edge is darkened (0 = left/top, 1 = right/bottom)
+    intensity:  fraction of brightness lost at the dark edge [0.2, 0.6]
+    """
+    direction  = rng.choice(["horizontal", "vertical", "diagonal"])
+    dark_side  = rng.randint(0, 1)
+    intensity  = rng.uniform(0.2, 0.6)
+
+    h, w = img.shape[:2]
+
+    if direction == "horizontal":
+        ramp = np.linspace(0, 1, w, dtype=np.float32)
+        mask = np.tile(ramp, (h, 1))
+    elif direction == "vertical":
+        ramp = np.linspace(0, 1, h, dtype=np.float32)
+        mask = np.tile(ramp[:, np.newaxis], (1, w))
+    else:  
+        ramp_x = np.linspace(0, 1, w, dtype=np.float32)
+        ramp_y = np.linspace(0, 1, h, dtype=np.float32)
+        mask   = np.outer(ramp_y, ramp_x)
+
+    if dark_side == 0:
+        mask = 1.0 - mask
+
+    # bright side = no change, dark side = multiply by (1 - intensity)
+    scale = 1.0 - intensity * (1.0 - mask)
+    scale = scale[:, :, np.newaxis]
+
+    out = _clip(img.astype(np.float32) * scale)
+    return out, {"direction": direction, "dark_side": dark_side,
+                 "intensity": round(intensity, 3)}
