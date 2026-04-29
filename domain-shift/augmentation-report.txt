@@ -464,3 +464,53 @@ Applied in LAB colour space (L channel only) to avoid hue shifts.
 
 ------------------------------------------------------
 
+This function simulates the fact that in a real inspection line, the part being inspected is never placed in exactly the same position and orientation twice.
+
+	Part placement variation
+even with a fixture or vacuum gripper, parts have positional tolerances. A metal nut dropped onto an inspection tapis lands at a slightly different position and angle each time. The fixture constrains this but does not eliminate it.
+
+
+	Camera mounting drift or remounting/replacement
+cameras are bolted to frames that vibrate, thermally expand, and get bumped during maintenance. A camera that was calibrated at installation may be slightly translated or rotated relative to its original position weeks later.
+
+Both effects mean the model sees the part at a slightly different position, orientation, and perspective than during training
+
+An affine transformation is any transformation that preserves straight lines and parallelism but not necessarily angles or distances
+
+[x']   [a  b  tx] [x]			 [[a,b],[c,d]] handles rotation, scaling, and shear
+[y'] = [c  d  ty] [y]			[tx, ty] handles translation
+                  [1]
+
+Shear is defined as horizontal displacement per unit vertical distance. Shear = 0.08 means a point 100px above the centre shifts 8px horizontally
+
+shear of ±0.08 corresponds to ±4.6°. This is physically equivalent to a camera whose optical axis is tilted 4.6° away from perpendicular to the inspection surface — the image plane is slightly non-parallel to the object plane. That is realistic for a remounted camera
+
+aligned samples and consistent scale within each class. In real-world automated inspection scenarios, these conditions may not always hold; factors such as inaccurate control or environmental changes can cause significant variations in object scale and viewpoint. This suggests that the mild conditions provided by existing datasets may not fully capture the complexities of real-world IAD applications.
+
+unaligned, multi-viewpoint conditions documented as
+            a real-world domain shift for IAD (Zhang et al., AeBAD, 2023)
+	translation: ±50 px   → ±5.6mm, parts not fixtured
+
+
+AeBAD paper — unaligned samples and viewpoint shift as real-world domain shift for IAD 		(most info from there): 
+		https://arxiv.org/abs/2304.02216
+
+Beyond Academic Benchmarks 2025 — perspective transform used as standard robustness evaluation augmentation: 
+		https://arxiv.org/html/2503.23451v1
+
+Anomaly-focused augmentation 2025 — rotation and shear applied to defect images without destroying defect morphology: 
+		https://www.researchgate.net/publication/391750942
+
+Tandfonline IAD survey 2025 — geometric manipulation as standard augmentation family: 
+		https://www.tandfonline.com/doi/full/10.1080/0951192X.2025.2599548
+
+
+
+
+
+
+
+
+
+
+

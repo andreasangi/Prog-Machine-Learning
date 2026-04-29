@@ -287,3 +287,43 @@ def apply_contrast(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
     lab_eq = cv2.merge([L_eq, a, b])
     out    = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
     return out, {"clip_limit": round(clip_limit, 2), "tile_size": tile_size}
+
+
+def apply_affine(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Small affine transformation: translation + rotation + mild shear.
+
+    Industrial case: imperfect part placement on the inspection fixture, a
+    camera that shifted slightly between calibration and deployment or got changed/remouted.
+
+    Plausible ranges (industrial fixture tolerances):
+        translation: ±40 px 
+        rotation:    ±25°
+        shear:       ±0.08 (±4.6° camera tilt)
+    """
+    h, w = img.shape[:2]
+    tx    = rng.uniform(-40, 40)    # translation x
+    ty    = rng.uniform(-40, 40)    #translation y
+    angle = rng.uniform(-25, 25)
+    shear = rng.uniform(-0.08, 0.08)
+
+    # Build affine matrix (rotation + shear) around center, then translate
+    cx, cy = w / 2, h / 2
+
+    angle_rad = np.deg2rad(angle)
+    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
+    a = cos_a - shear * sin_a
+    b = -sin_a + shear * cos_a
+    c = sin_a
+    d = cos_a
+
+    rot_mat = np.array([
+        [a, b, (1 - a) * cx - b * cy + tx],
+        [c, d, (1 - d) * cy - c * cx + ty],
+    ], dtype=np.float32)
+
+    out = cv2.warpAffine(img, rot_mat, (w, h),
+                         flags=cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REPLICATE) # reflect border to avoid black edges
+    return out, {"tx": round(tx, 2), "ty": round(ty, 2),
+                 "angle_deg": round(angle, 2), "shear": round(shear, 4)}
