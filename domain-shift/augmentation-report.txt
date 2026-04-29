@@ -351,6 +351,12 @@ The problem with global HE: it computes one transform for the whole image. If on
 AHE fixes the global problem by dividing the image into tiles and computing a separate histogram equalization for each tile. Each pixel is enhanced based on the local statistics of its neighbourhood. 
 The problem with AHE: in uniform regions (flat surfaces, backgrounds) the local histogram is very narrow and the equalization amplifies noise catastrophically.
 
+CLAHE (Contrast‑Limited AHE)
+CLAHE limits how much any local histogram bin can dominate:
+
+	prevents extreme noise amplification
+	keeps the enhancement realistic			 CLAHE = local contrast boost with an upper limit.
+
 CLAHE adds one crucial modification: it clips the histogram before computing the CDF. Any histogram bin that exceeds clip_limit gets its excess redistributed uniformly across all other bins before equalization. This prevents any single intensity level from dominating the transform, which limits how aggressively low-contrast regions get enhanced.
 
 CLAHE was originally developed for medical imaging and proven successful for enhancement of low-contrast images. It overcomes the limitations of standard histogram equalization by combining adaptive local processing with a contrast-limiting mechanism.
@@ -358,9 +364,103 @@ CLAHE was originally developed for medical imaging and proven successful for enh
 Zuiderveld, K.J. — "Contrast Limited Adaptive Histogram Equalization", Graphics Gems IV, Academic Press, 1994, pp. 474–485.
 https://www.cse.unr.edu/~bebis/CS474/StudentPaperPresentations/1994%20-%20CLAHE.pdf
 
+	clip_limit
+OpenCV's implementation defines it as the ratio of the clip threshold to the average bin count: 	clip_threshold = clip_limit × (tile_area / 256). 
+clip_limit = 1.0 means clipping at the average,very aggressive, most bins are redistributed, the result approaches uniform equalization. 
+clip_limit = 40.0 approaches plain AHE with minimal clipping. 
+range of [1.0, 6.0] therefore spans from heavy clipping (subtle effect) to moderate clipping (stronger local enhancement with some noise amplification)
+
+Industrial cameras implement AGC as automatic adjustment of sensor gain to achieve a preset brightness reference value, with a configurable gain limit that is not exceeded when AGC is enabled. The gain can be adjusted in mean mode, targeting the average brightness of the image, or in peak white mode, targeting a reference quantity of white pixels.
+
+real camera AGC operates globally, it adjusts a single gain value for the whole sensor. But the perceptual effect of different AGC settings between two cameras is that images of the same scene will have different local contrast distributions, particularly in mixed-contrast scenes (dark background, bright object). 
+CLAHE with varying clip limits reproduces this effect locally, different clip limits produce different local contrast enhancements that mimic what different AGC calibrations produce in practice. 
+It is a functional simulation, not a physically exact one, but it is the standard approach in the augmentation literature for this type of domain shift.
+
+	LAB (also written L*a*b* or CIELAB) is a colour space defined by the International Commission on Illumination (CIE) in 1976. It has three channels
+
+	L: Lightness 	 perceived brightness, range [0, 100]. 0 is black, 100 is white.
+	a: green		red opponent axis. Negative values are green, positive are red.
+	b: blue		yellow opponent axis. Negative values are blue, positive are yellow.
+
+Perceptual uniformity: 
+equal numerical distances in LAB correspond to roughly equal perceived colour differences. This is not true in BGR or even HSV, a change of 10 units in blue looks very different from a change of 10 units in red perceptually
+
+Luminance-chrominance separation: 
+L contains all brightness information. a and b contain only colour information with no brightness component. We can process brightness independently of colour, change contrast without introducing any hue or saturation shifts.
+
+https://pmc.ncbi.nlm.nih.gov/articles/PMC12230580/		A systematic survey: role of deep learning-based image anomaly detection in industrial inspection contexts
+
+Real cameras often have auto contrast enhancement
+So the same object can produce different texture/contrast statistics without being defective.
+
+This affects anomaly detectors because:
+	contrast changes alter edge strength, fine scratches can be boosted or washed out, feature embeddings shift
+
+clip_limit  [1.0, 6.0]
+ Very large values will let the histogram equalization do whatever it wants, resulting in maximal local contrast. A value of 1 will result (almost, very subtle effects, barely distinguishable from the original) in the original image
+
+Real AGC is a global operation, one gain value for the whole sensor. CLAHE is a local operation, different transforms for different regions. They produce different visual effects. CLAHE more accurately models a camera with spatially varying response (like pixel vignetting or fixed pattern noise that varies locally) than global AGC. 
+a more precise framing is: "CLAHE with varying clip limits simulates spatially non-uniform contrast response variation between camera units, which in practice arises from differences in sensor calibration, AGC setpoint, and local fixed pattern noise." can't really go claiming it directly models AGC.
+
+https://santhalakshminarayana.github.io/blog/chromatic-adaptation		proposes an image-adaptive version of CLAHE specifically motivated by industrial applications
 
 
+		PROBLEM ==== RELATION CLAHE AGC
+
+A peer-reviewed paper on AGC for image-intensified cameras proposes histogram equalization with AGC combined as a unified image enhancement system, implemented in FPGA for real-time operation, explicitly treating the two as complementary parts of the same pipeline rather than separate concepts
+wE AR ENOT simulating AGC via analogy, it is implementing the functional output of AGC via histogram redistribution, which is exactly what histogram-based AGC systems do in hardware.
+
+!!!!!!!!!!!!!!!!!!!!! 
+Real AGC is a global operation. It adjusts one gain value for the whole sensor uniformly. The effect on the image is equivalent to apply_exposure — a global brightness scaling. CLAHE is local and adaptive. It is not what AGC produces.
+||||||||||||||||!!!!!
+
+clahe models:
+Spatially non-uniform contrast response between cameras due to sensor calibration differences, flat-field correction errors, and fixed pattern noise.
+
+Histogram-based AGC controls gain according to the statistical distribution of pixel values across the image, with the histogram area specifying which region is used for calculating the average grayscale value. Different cameras set this histogram region differently, producing different local contrast responses to the same scene.
+	https://dl.acm.org/doi/abs/10.1109/TPAMI.2004.88
+
+Industrial cameras operating in mean mode adjust the average brightness and colour rendering of the entire image to a preset target value, while in peak white mode the image is adjusted to a reference quantity of white pixels — these two modes produce measurably different contrast distributions from the same scene
+	https://www.sciencedirect.com/science/article/pii/S0166361523001409		ndustrial anomaly detection with domain shift: A real-world dataset and masked multi-scale reconstruction
+	https://www.researchgate.net/publication/290150167_A_Real-Time_Histogram_Equalization_System_with_Automatic_Gain_Control_Using_FPGA
+
+Different cameras, or even the same camera with different firmware settings, apply different histogram-based brightness control strategies. The result is that the same physical scene produces images with different local contrast distributions depending on which camera captured it. CLAHE with varying clip limits and tile counts reproduces exactly this family of local contrast variations.
+
+"""
+Local contrast variation via CLAHE, simulating spatially non-uniform
+contrast response differences between industrial camera units.
+
+Physical causes:
+  1. Different AGC/AES histogram modes between cameras (mean vs peak-white):
+     cameras targeting mean brightness vs peak brightness produce different
+     local contrast distributions from the same scene.
+  2. Flat-field correction drift: factory flat-field calibration files
+     become stale when lighting changes, leaving spatially variable
+     residual shading that interacts with the camera's tone mapping.
+  3. Firmware-level tone curve differences between camera models or
+     firmware versions apply different local contrast transfer functions.
+
+CLAHE with varying clip_limit and n_tiles reproduces this family of
+spatially non-uniform contrast variations without requiring knowledge
+of the specific camera's internal processing pipeline.
+
+Applied in LAB colour space (L channel only) to avoid hue shifts.
+"""
 
 
+"Contrast variation was simulated using CLAHE applied to the L channel of the LAB representation, with randomised clip limit and tile count parameters. This models the spatially non-uniform contrast response differences that arise between industrial camera units operating under different histogram-based brightness control strategies. As documented in the imaging literature, modern industrial cameras implement AGC via histogram analysis of pixel distributions rather than simple linear gain adjustment (Nomura et al., 2004; IDS uEye documentation, 2024). Cameras configured in mean-brightness mode versus peak-white mode apply different effective tone curves to the same scene, producing local contrast distributions that differ in a spatially structured way — which CLAHE with varying parameters directly reproduces. The clip limit range [2.0, 6.0] was selected to span from minimal contrast adjustment (clip_limit = 2, near-flat histogram) to moderate local boosting (clip_limit = 6), avoiding the extreme over-enhancement of OpenCV's default value of 40."
 
+	to cite:
+		Nomura, H. et al. — "A Real-Time Histogram Equalization System with Automatic Gain Control Using FPGA", ResearchGate / IEEE, 2004. Available at: 									https://www.researchgate.net/publication/290150167
+
+		IDS Imaging / 1stVision — "AES/AGC: Automatic brightness control", uEye Camera Manual, 2024. Available at: 
+			https://www.1stvision.com/cameras/IDS/IDS-manuals/uEye_Manual/hw_aesagcafr.html
+		mean-mode vs peak-white-mode distinction
+
+
+-----------------------------------------------------
+
+	AFFINE TRANSFORM
+
+------------------------------------------------------
 

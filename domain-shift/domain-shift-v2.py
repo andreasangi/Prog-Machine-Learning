@@ -259,3 +259,31 @@ def apply_shadow(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]
                  "intensity": round(intensity, 3)}
 
 
+def apply_contrast(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Local contrast variation via CLAHE (Contrast Limited Adaptive Histogram Equalization), 
+    simulating spatially non-uniform contrast response differences between 
+    industrial camera units.
+
+    Low clip_limit = subtle local contrast enhancement.
+    High clip_limit = aggressive local boosting, creates blocky appearance.
+
+    Applied in LAB colour space (L channel only) to avoid hue shifts.
+
+    Industrial case: different AGC/AES histogram modes between cameras (mean vs peak-white),
+        Flat-field correction drift, Firmware-level tone curve differences between camera models or firmware versions
+    Plausible range: clip_limit [2, 6.0], tile_grid [8, 16, 32]
+    """
+    clip_limit = rng.uniform(2.0, 6.0)
+    tile_size  = rng.choice([8, 16, 32])
+
+    lab  = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    L, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=clip_limit,
+                             tileGridSize=(tile_size, tile_size))
+    L_eq  = clahe.apply(L)
+
+    lab_eq = cv2.merge([L_eq, a, b])
+    out    = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+    return out, {"clip_limit": round(clip_limit, 2), "tile_size": tile_size}
