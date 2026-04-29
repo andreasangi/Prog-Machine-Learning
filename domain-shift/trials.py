@@ -42,52 +42,42 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
         return rng.sample(paths, n)
     return paths[:n]
 
-def apply_blur(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_perspective(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Motion blur (directional) OR defocus blur (isotropic), chosen randomly.
+    Mild perspective warp to simulate camera tilt or off-axis mounting.
 
-    Motion blur:   linear kernel at a random angle -
-                   models conveyor, camera vibration or object not perfectly still during exposure.
-    Defocus blur:  Gaussian kernel
-                   Object not on focal plane,
-                   models depth-of-field variation when objects have different 
-                   heights on the inspection tapis.
+    Four corner points are perturbed independently by a small random
+    amount, then cv2.getPerspectiveTransform maps them to the full frame.
 
-    Plausible kernel sizes: motion length ∈ [5, 25 px], angle ∈ [0°, 180°]
-                            defocus sigma ∈ [1.5, 6.0]
+    Industrial case:
+    slight camera tilt after maintenace, fixture wobble, imperfect mounting,
+    parts not planar to the sensor, etc. 
+
+    Plausible range: corner jitter ∈ [0, perturb_frac × min(h,w)]
+                     perturb_frac ∈ [0.02, 0.07]  (2–7% of image size)
     """
-    kind = rng.choice(["motion", "defocus"])
-    params: dict = {"kind": kind}
+    h, w   = img.shape[:2]
+    frac   = rng.uniform(0.02, 0.07)
+    jitter = frac * min(h, w)   # converts to px, and ensures perturbation scales with image size
 
-    if kind == "motion":
-        length = rng.randint(5, 25)
-        angle  = rng.uniform(0, 180)
-        params.update({"length": length, "angle_deg": round(angle, 1)})
+    def j():
+        return rng.uniform(-jitter, jitter)
 
-        # Build a line at the desired angle to create the kernel
-        kernel = np.zeros((length, length), dtype=np.float32)
-        cx, cy = length // 2, length // 2
-        angle_rad = np.deg2rad(angle)
-        x1 = int(cx - (length // 2) * np.cos(angle_rad))
-        y1 = int(cy - (length // 2) * np.sin(angle_rad))
-        x2 = int(cx + (length // 2) * np.cos(angle_rad))
-        y2 = int(cy + (length // 2) * np.sin(angle_rad))
-        cv2.line(kernel, (x1, y1), (x2, y2), 1.0, 1)
+    src = np.float32([[0,   0  ],
+                      [w-1, 0  ],
+                      [w-1, h-1],
+                      [0,   h-1]])
+    dst = np.float32([[0   + j(), 0   + j()],
+                      [w-1 + j(), 0   + j()],
+                      [w-1 + j(), h-1 + j()],
+                      [0   + j(), h-1 + j()]])
 
-        kernel  = kernel / kernel.sum()             # re-normalise after rotation
-            # warpAffine uses bilinear interpolation when rotating, which distributes energy 
-            # across neighbouring pixels and can reduce the kernel sum below 1, causing 
-            # the blurred image to darken slightly
-
-        out     = cv2.filter2D(img, -1, kernel)
-
-    else:  # defocus
-        sigma = rng.uniform(1.5, 6.0)
-        ksize = int(sigma * 6) | 1                 # must be odd
-        params.update({"sigma": round(sigma, 2), "ksize": ksize})
-        out   = cv2.GaussianBlur(img, (ksize, ksize), sigma)
-
-    return out, params
+    M   = cv2.getPerspectiveTransform(src, dst)
+    out = cv2.warpPerspective(img, M, (w, h),
+                              flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REFLECT_101)
+    return out, {"perturb_frac": round(frac, 4),
+                 "dst_corners":  dst.tolist()}
 
 
 
@@ -115,7 +105,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_blur(img_bgr, rng)
+        aug_bgr, params = apply_perspective(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -123,26 +113,17 @@ def main():
         axes[0, i].axis("off")
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
-        if params["kind"] == "motion":
-            subtitle = f"motion | len={params['length']} angle={params['angle_deg']}°"
-        else:
-            subtitle = f"defocus | sigma={params['sigma']} k={params['ksize']}"
+        subtitle = f"perturb_frac={params['perturb_frac']}"
 
         axes[1, i].set_title(
-            f"Blur Shifted | {cls_name}\n{subtitle}"
+            f"Perspective Shifted | {cls_name}\n{subtitle}"
         )
         axes[1, i].axis("off")
 
-        if params["kind"] == "motion":
-            print(
-                f"[{cls_name}] {img_path.name} -> "
-                f"kind=motion, length={params['length']}, angle_deg={params['angle_deg']}"
-            )
-        else:
-            print(
-                f"[{cls_name}] {img_path.name} -> "
-                f"kind=defocus, sigma={params['sigma']}, ksize={params['ksize']}"
-            )
+        print(
+            f"[{cls_name}] {img_path.name} -> "
+            f"perturb_frac={params['perturb_frac']}"
+        )
 
     plt.tight_layout()
     plt.show()

@@ -506,6 +506,40 @@ Tandfonline IAD survey 2025 — geometric manipulation as standard augmentation 
 
 
 
+-----------------------------------------------------
+
+	PERSPECTIVE
+
+------------------------------------------------------
+
+A camera viewing a flat object (the nut) from a slightly different angle does not just rotate or translate the image.
+It creates perspective distortion: parallel lines can converge, and one side appears smaller.
+That kind of distortion is called a projective transform (also called a homography).
+
+A homography is a 3×3 matrix that maps a point (x,y) in one plane to a new point (x ′,y ′) in another plane, it's more general than an affine transform because it allows tilt and depth effects.
+
+A homography is fully determined by 4 point correspondences.
+So if you know where the four corners of the image should move, you can solve for the entire transform
+
+jitter = frac * min(h, w)
+	Converts fraction to pixels based on smallest dimension.
+	Keeps perturbation scale consistent across image sizes.
+
+M = cv2.getPerspectiveTransform(src, dst)
+	OpenCV method that computes the 3×3 homography matrix M.
+	M maps the original corners (src) to the perturbed corners (dst).
+		it's the core projective transform.
+
+out = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+	Applies the perspective warp to every pixel.
+	(w, h) is the output size (same as input).
+	cv2.INTER_LINEAR is bilinear interpolation (smooth resampling).
+
+
+
+
+
+
 
 
 
