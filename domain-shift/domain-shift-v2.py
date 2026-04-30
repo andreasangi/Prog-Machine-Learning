@@ -327,3 +327,92 @@ def apply_affine(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]
                          borderMode=cv2.BORDER_REPLICATE) # reflect border to avoid black edges
     return out, {"tx": round(tx, 2), "ty": round(ty, 2),
                  "angle_deg": round(angle, 2), "shear": round(shear, 4)}
+
+
+def apply_perspective(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Perspective warp derived from physical camera tilt angles.
+
+    Builds the homography from explicit pitch and roll angles, this guarantees that circles
+    remain ellipses, straight lines remain straight, and the warp corresponds
+    to a real camera position.
+
+    Physical model: pinhole camera, planar object, orthographic approximation
+    for small angles. Focal length f = image width, corresponding to ca.53° horizontal
+    FOV which is slightly wider than a typical macro lens but chosen to produce clearly
+    visible perspective distortion per degree of tilt, appropriate for a robustness test.
+
+    Industrial case: camera remounted after maintenance with slight tilt,
+    fixture not perfectly level, imperfect mounting, Scheimpflug tilt for depth of field control.
+
+    Plausible range:
+        pitch (x-tilt): ±15°   camera nodding forward/backward
+        roll  (y-tilt): ±15°   camera tilting left/right
+        Both angles independently sampled.
+    """
+    h, w = img.shape[:2]
+    cx, cy = w / 2, h / 2
+
+    f = w   # ~53° horizontal FOV
+
+    pitch_deg = rng.uniform(-15, 15)
+    roll_deg  = rng.uniform(-15, 15)
+    pitch = np.deg2rad(pitch_deg)
+    roll  = np.deg2rad(roll_deg)
+
+    Rx = np.array([[1,           0,            0],
+                   [0,  np.cos(pitch), -np.sin(pitch)],
+                   [0,  np.sin(pitch),  np.cos(pitch)]], dtype=np.float64)
+
+    Ry = np.array([[ np.cos(roll), 0, np.sin(roll)],
+                   [0,             1,           0  ],
+                   [-np.sin(roll), 0, np.cos(roll)]], dtype=np.float64)
+
+    K = np.array([[f,  0, cx],
+                  [0,  f, cy],
+                  [0,  0,  1]], dtype=np.float64)
+
+    H = K @ (Ry @ Rx) @ np.linalg.inv(K)
+    H /= H[2, 2]
+
+    # Recentre: find where image centre maps to and translate it back
+    centre_mapped = H @ np.array([cx, cy, 1.0])
+    centre_mapped /= centre_mapped[2]
+    T = np.array([[1, 0, cx - centre_mapped[0]],
+                  [0, 1, cy - centre_mapped[1]],
+                  [0, 0, 1                    ]], dtype=np.float64)
+    H = T @ H
+    H /= H[2, 2]
+
+    # Conditional scaling: measure actual overflow on each side independently,
+    # only scale if something genuinely clips outside the frame
+    corners = np.array([[0,0,1],[w,0,1],[w,h,1],[0,h,1]], dtype=np.float64)
+    mapped  = (H @ corners.T).T
+    mapped  = mapped[:, :2] / mapped[:, 2:3]
+
+    overflow = max(
+        max(-mapped[:,0].min(), 0) / w,      # left side
+        max(mapped[:,0].max() - w, 0) / w,   # right side
+        max(-mapped[:,1].min(), 0) / h,      # top
+        max(mapped[:,1].max() - h, 0) / h    # bottom
+    )
+
+    if overflow > 0.01:   # threshold: only act if overflow exceeds 1% of image
+        scale = 1.0 - overflow * 1.05        # pull in by just enough + 5% margin
+        S = np.array([[scale, 0,     cx * (1 - scale)],
+                      [0,     scale, cy * (1 - scale)],
+                      [0,     0,     1               ]], dtype=np.float64)
+        H = S @ H
+        H /= H[2, 2]
+    else:
+        scale = 1.0
+
+    out = cv2.warpPerspective(img, H, (w, h),
+                              flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REPLICATE)
+
+    return out, {
+        "pitch_deg":     round(pitch_deg, 2),
+        "roll_deg":      round(roll_deg,  2),
+        "scale_applied": round(scale, 4),
+    }
