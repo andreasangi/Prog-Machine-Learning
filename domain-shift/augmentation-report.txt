@@ -521,19 +521,78 @@ A homography is a 3×3 matrix that maps a point (x,y) in one plane to a new poin
 A homography is fully determined by 4 point correspondences.
 So if you know where the four corners of the image should move, you can solve for the entire transform
 
-jitter = frac * min(h, w)
-	Converts fraction to pixels based on smallest dimension.
-	Keeps perturbation scale consistent across image sizes.
+Step 1: Define the camera intrinsic matrix K
+pythonf = w
+K = np.array([[f,  0, cx],
+              [0,  f, cy],
+              [0,  0,  1]], dtype=np.float64)
+K is the camera intrinsic matrix, it encodes how a 3D point in camera coordinates gets projected onto the 2D image plane. It comes from the pinhole camera model:
+	x_pixel = f × (X/Z) + cx
+	y_pixel = f × (Y/Z) + cy
+In matrix form this is exactly K. 
 
-M = cv2.getPerspectiveTransform(src, dst)
-	OpenCV method that computes the 3×3 homography matrix M.
-	M maps the original corners (src) to the perturbed corners (dst).
-		it's the core projective transform.
+		the diagonal entries [f, f] are the focal length in pixels, they control how much the image magnifies the scene. 
 
-out = cv2.warpPerspective(img, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-	Applies the perspective warp to every pixel.
-	(w, h) is the output size (same as input).
-	cv2.INTER_LINEAR is bilinear interpolation (smooth resampling).
+		cx, cy is the principal point — where the optical axis intersects the sensor, assumed to be the image centre.
+
+What K does in this context: it converts between pixel coordinates and normalised camera coordinates (rays from the optical centre). 
+K_inv maps a pixel (u, v) to a unit ray direction. 
+K maps a ray back to a pixel. 			!!!!  need both directions to build the homography.
+
+Rx and Ry are the standard 3D rotation matrices around the x-axis (pitch) and y-axis (roll) respectively. They come directly from the definition of rotation in 3D Euclidean space.
+
+	Rx rotates vectors around the x-axis (tilts the camera forward or backward), there a trapezoid effect that compresses the top edge
+
+	Ry rotates vectors around the y-axis ( tilts the camera left or right) 
+		ex. positive roll angle rotates the right side of the image away from the camera, compressing the right edge
+
+
+
+	H = K @ R @ K_inv 
+
+derives from the planar homography theorem
+when a camera rotates (with no translation) around its optical centre while viewing a flat surface, the mapping between the original image and the new image is exactly a homography of this form.
+
+	==== RECENTER ====
+
+the perspective divide after rotation causes the centre of the image to drift. 
+	1 - apply H to the image centre point (cx, cy, 1) and do the perspective divide to find where it ends up 
+	2 - build a pure 2D translation matrix T that shifts BACK TO THE CENTER
+
+
+	==== SCALE ====
+
+After the rotation and recentring, the four corners of the source image may map to positions outside the output frame
+Only runs when something actually clips
+
+
+
+out = cv2.warpPerspective(img, H, (w, h),
+                          flags=cv2.INTER_LINEAR,
+                          borderMode
+
+applies the final composed H to the image
+
+
+Motivation
+In computer vision, any two images of the same planar surface are related by a homography under the pinhole camera model. This relationship holds both when the scene is planar and when two cameras are related purely by a rotation around the optical centre. Industrial inspection systems are subject to both conditions: the inspected part (a metal nut) is approximately planar, and camera tilt after maintenance or imperfect mounting constitutes a pure rotation of the camera around its optical centre. This makes the homography the exact and correct mathematical model for the domain shift we want to simulate, rather than an approximation.
+
+Why not random corner perturbation
+The naive approach to perspective augmentation — independently jittering the four corners of the image and computing a homography from the perturbed quadrilateral — was rejected for a fundamental reason. A planar homography has eight degrees of freedom, and while four corner positions are widely adopted as a parameterisation, this approach lacks geometric interpretability. More critically, sampling those eight degrees of freedom randomly produces homographies that correspond to no physically realisable camera position
+
+	== citations ==
+	
+Hartley, R. & Zisserman, A. — Multiple View Geometry in Computer Vision, 2nd ed., Cambridge University Press, 2004. Chapter 8 derives H = K·R·K⁻¹ from first principles. The primary academic reference for this entire approach.
+
+OpenCV documentation — Basic concepts of the homography explained with code: https://docs.opencv.org/4.x/d9/dab/tutorial_homography.html
+
+MIT Vision Book — Homographies, Chapter 41: https://visionbook.mit.edu/homography.html
+
+
+
+
+
+
 
 
 
