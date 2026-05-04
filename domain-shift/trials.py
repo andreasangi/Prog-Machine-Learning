@@ -43,73 +43,44 @@ def choose_samples(paths: list[Path], n_samples: int, rng: random.Random, random
     return paths[:n]
 
 
-def apply_perspective(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+def apply_specular(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
-    Perspective warp derived from physical camera tilt angles.
+    Simulates a specular / glare hotspot on reflective surfaces.
 
-    Builds the homography from explicit pitch and roll angles, this guarantees that circles
-    remain ellipses, straight lines remain straight, and the warp corresponds
-    to a real camera position.
+    A bright, soft ellipse is blended additively onto the image, with
+    intensity falling off as a 2D Gaussian.
 
-    Physical model: pinhole camera, planar object, orthographic approximation
-    for small angles. Focal length estimated from image size.
+    Industrial case: metallic and polished surfaces (many MVTec
+    categories: metal_nut, screw, transistor) produce strong specular
+    reflections when illumination angle changes slightly.
 
-    Industrial case: camera remounted after maintenance with slight tilt,
-    fixture not perfectly level, imperfect mounting, Scheimpflug tilt for depth of field control.
-
-    Plausible range:
-        pitch (x-tilt): ±15°  — camera nodding forward/backward
-        roll  (y-tilt): ±15°  — camera tilting left/right
-        Both angles independently sampled.
+    Plausible range: hotspot covers 5–25% of image area, brightness ∈ [80, 220]
     """
-    h, w = img.shape[:2]
+    h, w   = img.shape[:2]
+    cx     = rng.uniform(0.2, 0.8) * w          # center coords (inner 60% of image)
+    cy     = rng.uniform(0.2, 0.8) * h
+    rx     = rng.uniform(0.05, 0.25) * w        # radius in x/y (ellipse axes)
+    ry     = rng.uniform(0.05, 0.25) * h
+    bright = rng.uniform(80, 220)            # peak intensity, added at the center
 
-    # Estimated focal length: reasonable assumption for machine vision macro lens
-    # Approximately equal to image width for a ~50° horizontal FOV
-    f = w
+    xs = np.arange(w, dtype=np.float32)
+    ys = np.arange(h, dtype=np.float32)
+    X, Y = np.meshgrid(xs, ys)
 
-    pitch_deg = rng.uniform(-15, 15)   # tilt around x axis (forward/back)
-    roll_deg  = rng.uniform(-15, 15)   # tilt around y axis (left/right)
+    # Gaussian hotspot (sigma = radius / 2)
+    hotspot = bright * np.exp(-(((X - cx) / (rx / 2)) ** 2 +
+                                ((Y - cy) / (ry / 2)) ** 2) / 2)
+    hotspot = hotspot[:, :, np.newaxis]
 
-    pitch = np.deg2rad(pitch_deg)
-    roll  = np.deg2rad(roll_deg)
-
-    # Rotation matrices around x and y axes
-    Rx = np.array([[1,           0,            0],
-                   [0,  np.cos(pitch), -np.sin(pitch)],
-                   [0,  np.sin(pitch),  np.cos(pitch)]], dtype=np.float32)
-
-    Ry = np.array([[ np.cos(roll), 0, np.sin(roll)],
-                   [0,             1,           0  ],
-                   [-np.sin(roll), 0, np.cos(roll)]], dtype=np.float32)
-
-    R = Ry @ Rx   # combined rotation
-
-    # Camera intrinsic matrix, principal point at image centre
-    cx, cy = w / 2, h / 2
-    K = np.array([[f,  0, cx],
-                  [0,  f, cy],
-                  [0,  0,  1]], dtype=np.float32)
-
-    # Homography: H = K @ R @ K_inv
-    # Valid for planar scene viewed from different angles
-    H = K @ R @ np.linalg.inv(K)
-    H = H / H[2, 2]   # normalise so H[2,2] = 1
-
-    out = cv2.warpPerspective(img, H, (w, h),
-                              flags=cv2.INTER_LINEAR,
-                              borderMode=cv2.BORDER_REFLECT_101)
-
-    return out, {
-        "pitch_deg": round(pitch_deg, 2),
-        "roll_deg":  round(roll_deg,  2),
-    }
-
+    out = _clip(img.astype(np.float32) + hotspot)
+    return out, {"cx": round(cx, 1), "cy": round(cy, 1),
+                 "rx": round(rx, 1), "ry": round(ry, 1),
+                 "brightness": round(bright, 1)}
 
 def main():
     test_dir = Path("../data/metal_nut/test").resolve()
     n_samples = 4
-    seed = 47
+    seed = 41
     random_pick = True  # False = first N images
 
     rng = random.Random(seed)
@@ -130,7 +101,7 @@ def main():
             print(f"Skipping unreadable image: {img_path}")
             continue
 
-        aug_bgr, params = apply_perspective(img_bgr, rng)
+        aug_bgr, params = apply_specular(img_bgr, rng)
         cls_name = img_path.parent.name
 
         axes[0, i].imshow(_bgr_to_rgb(img_bgr))
@@ -139,17 +110,21 @@ def main():
 
         axes[1, i].imshow(_bgr_to_rgb(aug_bgr))
         subtitle = (
-            f"pitch={params['pitch_deg']} roll={params['roll_deg']}"
+            f"cx={params['cx']} cy={params['cy']} "
+            f"rx={params['rx']} ry={params['ry']} "
+            f"bright={params['brightness']}"
         )
 
         axes[1, i].set_title(
-            f"Perspective Shifted | {cls_name}\n{subtitle}"
+            f"Specular Shifted | {cls_name}\n{subtitle}"
         )
         axes[1, i].axis("off")
 
         print(
             f"[{cls_name}] {img_path.name} -> "
-            f"pitch_deg={params['pitch_deg']}, roll_deg={params['roll_deg']}"
+            f"cx={params['cx']}, cy={params['cy']}, "
+            f"rx={params['rx']}, ry={params['ry']}, "
+            f"brightness={params['brightness']}"
         )
 
     plt.tight_layout()

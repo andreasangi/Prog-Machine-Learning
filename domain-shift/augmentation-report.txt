@@ -591,19 +591,60 @@ MIT Vision Book — Homographies, Chapter 41: https://visionbook.mit.edu/homogra
 
 
 
+-----------------------------------------------------
+
+	SPECULAR REFLECTION
+
+------------------------------------------------------
+
+ creates a synthetic specular highlight,a bright glowing spot,and adds it onto the image using additive blending. The spot is modelled as a 2D Gaussian ellipse: maximum brightness at the centre (cx, cy), falling off smoothly toward zero at a distance determined by the radii rx and ry. Additive blending means pixel values only increase: the hotspot adds light, never removes it, which is physically correct for a reflection
+
+The centre is constrained to the inner 60% of the image (0.2 to 0.8) to avoid hotspots entirely at the border where they would be half-cropped and look artificial. Radii are independently sampled for x and y, and this produces elliptical rather than circular hotspots which is physically correct since specular reflections aren't perfectly circular
+
+	X, Y = np.meshgrid(np.arange(w), np.arange(h))
+Builds two 2D arrays of the same shape as the image: X contains the column index at every pixel, Y contains the row index. This is the standard way to evaluate a function of position over an entire image without looping over pixels.
 
 
+2D Gaussian evaluated at every pixel simultaneously. The formula is:
+
+			G(x,y) = bright × exp( -( ((x-cx)/(rx/2))² + ((y-cy)/(ry/2))² ) / 2 )
+			
+				rx is not the standard deviation but twice it.
+				At distance rx the hotspot still has 13.5% of peak intensity, because exp(-2) ca. 0.135
+
+	hotspot = hotspot[:, :, np.newaxis]
+newaxis makes hotspot broadcastable over the three BGR channels,the same intensity is added to B, G, and R equally, producing a white highlight.
+ _clip prevents overflow above 255.
 
 
+surfaces with Gaussian roughness distribution (the standard assumption in physically based rendering), this integral produces exactly a Gaussian-shaped highlight.
+ This is the Torrance-Sparrow or Cook-Torrance microfacet model, where the Normal Distribution Function (NDF) governing the highlight shape is typically a Gaussian or GGX distribution. Gaussian hotspot it's the correct first-order model
+
+Additive blending is correct because specular reflection adds energy to what the camera sees, it is light from the source reflected toward the camera on top of the diffuse surface appearance. Real HDR specular highlights saturate pixels to 255
+
+	==== LIMITATIONS ====
+
+		the hotspot is always white: for most LED illuminants ok (MVTec captured using LEDs), but not for every light
+		
+		sigma = radius/2 is arbitrary --> it is just a cosmetic choice for how soft the falloff looks
+
+		no interaction with the existing image brightness
+		
+		single hostpot only
 
 
+	==== CITATIONS ====
+
+	Gaussian highlight shape from Gaussian surface roughness:
+
+Torrance, K.E. & Sparrow, E.M. — "Theory for Off-Specular Reflection From Roughened Surfaces", Journal of the Optical Society of America, Vol. 57, No. 9, 1967. The original paper deriving the Gaussian NDF from surface microgeometry. DOI: 10.1364/JOSA.57.001105
 
 
+	additive blending as the correct physical model for specular highlights:
+
+Cook, R.L. & Torrance, K.E. — "A Reflectance Model for Computer Graphics", ACM Transactions on Graphics, Vol. 1, No. 1, 1982. DOI: 10.1145/357290.357293. The Cook-Torrance model establishes that specular contribution is additive to diffuse, which is the physical basis for your img + hotspot operation.
 
 
+	Industrial relevance — specular highlights on metal surfaces as an inspection challenge:
 
-
-
-
-
-
+Challenges in Industrial Surface Inspection — cite the MVTec paper itself: Bergmann et al., "MVTec AD — A Comprehensive Real-World Dataset for Unsupervised Anomaly Detection", CVPR 2019. The metal_nut, screw and transistor categories were specifically chosen to include reflective surfaces where specular effects are a known challenge.
