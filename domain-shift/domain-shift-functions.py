@@ -10,14 +10,30 @@ import numpy as np
 CLASS_FOLDERS = ["bent", "color", "flip", "good", "scratch"]
 VALID_EXTS = {".png", ".jpg", ".jpeg"}
 
+# Relative to this script's location (projectRoot/domain-shift/)
+SCRIPT_DIR  = Path(__file__).parent
+DATA_DIR    = SCRIPT_DIR.parent / "data" / "metal_nut" / "test"
+OUTPUT_ROOT = SCRIPT_DIR / "augmented_test"
+
 
 def _clip(img: np.ndarray) -> np.ndarray:
     """Clip float image to [0, 255] and cast to uint8."""
     return np.clip(img, 0, 255).astype(np.uint8)
 
-
 def _bgr_to_rgb(img: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+def _load(path: Path) -> np.ndarray:
+    img = cv2.imread(str(path))
+    if img is None:
+        raise FileNotFoundError(f"Cannot read: {path}")
+    return img
+
+def _save(img: np.ndarray, path: Path, params: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(path), img)
+    sidecar = path.with_name(path.stem + "_params.json")
+    sidecar.write_text(json.dumps(params, indent=2))
 
 def apply_exposure(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
     """
@@ -454,3 +470,38 @@ def apply_specular(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
     return out, {"cx": round(cx, 1), "cy": round(cy, 1),
                  "rx": round(rx, 1), "ry": round(ry, 1),
                  "brightness": round(bright, 1)}
+
+
+TRANSFORMS = {
+    "exposure":    apply_exposure,
+    "gamma":       apply_gamma,
+    "wb":          apply_white_balance,
+    "noise":       apply_noise,
+    "jpeg":        apply_jpeg,
+    "blur":        apply_blur,
+    "vignette":    apply_vignette,
+    "shadow":      apply_shadow,
+    "contrast":    apply_contrast,
+    "affine":      apply_affine,
+    "perspective": apply_perspective,
+    "specular":    apply_specular,
+}
+
+def sample_images(class_dir: Path, n, rng: random.Random) -> list[Path]:
+    """
+    Return a list of image paths from class_dir.
+    n = 'all' : every image in the directory.
+    n = int   : random sample of n (available if n > available).
+    """
+    all_imgs = sorted([p for p in class_dir.iterdir()
+                       if p.suffix.lower() in VALID_EXTS])
+    if not all_imgs:
+        return []
+    if n == "all":
+        return all_imgs
+    n = int(n)
+    if n >= len(all_imgs):
+        print(f"    [!] Requested {n} but only {len(all_imgs)} available "
+              f"in {class_dir.name} — using all.")
+        return all_imgs
+    return rng.sample(all_imgs, n)

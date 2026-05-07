@@ -72,7 +72,10 @@ def apply_specular(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dic
                                 ((Y - cy) / (ry / 2)) ** 2) / 2)
     hotspot = hotspot[:, :, np.newaxis]
 
-    out = _clip(img.astype(np.float32) + hotspot)
+    # Reduce hotspot where surface is already bright, we use exponential control 
+    headroom = ((255 - img.astype(np.float32)) / 255.0) ** 0.3   # 0 where saturated, 1 where dark
+
+    out = _clip(img.astype(np.float32) + hotspot * headroom)
     return out, {"cx": round(cx, 1), "cy": round(cy, 1),
                  "rx": round(rx, 1), "ry": round(ry, 1),
                  "brightness": round(bright, 1)}
