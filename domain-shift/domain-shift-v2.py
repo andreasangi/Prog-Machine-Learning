@@ -416,3 +416,41 @@ def apply_perspective(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, 
         "roll_deg":      round(roll_deg,  2),
         "scale_applied": round(scale, 4),
     }
+
+
+def apply_specular(img: np.ndarray, rng: random.Random) -> tuple[np.ndarray, dict]:
+    """
+    Simulates a specular / glare hotspot on reflective surfaces.
+
+    A bright, soft ellipse is blended additively onto the image, with
+    intensity falling off as a 2D Gaussian.
+
+    Industrial case: metallic and polished surfaces (many MVTec
+    categories: metal_nut, screw, transistor) produce strong specular
+    reflections when illumination angle changes slightly.
+
+    Plausible range: hotspot covers 5–25% of image area, brightness ∈ [80, 220]
+    """
+    h, w   = img.shape[:2]
+    cx     = rng.uniform(0.2, 0.8) * w          # center coords (inner 60% of image)
+    cy     = rng.uniform(0.2, 0.8) * h
+    rx     = rng.uniform(0.05, 0.25) * w        # radius in x/y (ellipse axes)
+    ry     = rng.uniform(0.05, 0.25) * h
+    bright = rng.uniform(80, 220)            # peak intensity, added at the center
+
+    xs = np.arange(w, dtype=np.float32)
+    ys = np.arange(h, dtype=np.float32)
+    X, Y = np.meshgrid(xs, ys)
+
+    # Gaussian hotspot (sigma = radius / 2)
+    hotspot = bright * np.exp(-(((X - cx) / (rx / 2)) ** 2 +
+                                ((Y - cy) / (ry / 2)) ** 2) / 2)
+    hotspot = hotspot[:, :, np.newaxis]
+
+    # Reduce hotspot where surface is already bright, we use exponential control not linear
+    headroom = ((255 - img.astype(np.float32)) / 255.0) ** 0.3   # 0 where saturated, 1 where dark
+
+    out = _clip(img.astype(np.float32) + hotspot * headroom)
+    return out, {"cx": round(cx, 1), "cy": round(cy, 1),
+                 "rx": round(rx, 1), "ry": round(ry, 1),
+                 "brightness": round(bright, 1)}

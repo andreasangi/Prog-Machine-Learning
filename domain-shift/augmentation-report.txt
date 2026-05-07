@@ -648,3 +648,7 @@ Cook, R.L. & Torrance, K.E. — "A Reflectance Model for Computer Graphics", ACM
 	Industrial relevance — specular highlights on metal surfaces as an inspection challenge:
 
 Challenges in Industrial Surface Inspection — cite the MVTec paper itself: Bergmann et al., "MVTec AD — A Comprehensive Real-World Dataset for Unsupervised Anomaly Detection", CVPR 2019. The metal_nut, screw and transistor categories were specifically chosen to include reflective surfaces where specular effects are a known challenge.
+
+
+
+A real specular highlight is stronger on surfaces that are already bright (high diffuse reflectance) and saturates there first. On dark surfaces the additive model is accurate. On already-bright surfaces (like the shiny face of a new metal nut), adding 200 brightness units to a pixel already at 180 just clips to 255, which is physically correct but produces a large flat saturated region that can look unnatural. A physically more accurate model would reduce the additive amount where the surface is already near saturation
