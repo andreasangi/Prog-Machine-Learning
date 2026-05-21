@@ -21,8 +21,6 @@ test structure:
         ├── test_exposure/
         └── ...
 
-Run:
-    python build_augmented_sets.py
 """
 
 import json
@@ -32,7 +30,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# Import all transform functions from the sibling file
+# Import all transform functions from the file
 from domain_shift_functions import (
     apply_blur,
     apply_contrast,
